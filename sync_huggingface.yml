@@ -1,0 +1,38 @@
+name: Sync to HuggingFace
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+          lfs: true
+
+      - name: Push to HuggingFace
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          git config user.email "being@repository.local"
+          git config user.name "Being Repository"
+          
+          pip install huggingface_hub
+          
+          python - <<EOF
+          from huggingface_hub import HfApi
+          import os
+          
+          api = HfApi(token=os.environ["HF_TOKEN"])
+          
+          api.upload_folder(
+              folder_path=".",
+              repo_id="YOUR_USERNAME/being-repository",
+              repo_type="dataset",
+              ignore_patterns=["*.pyc", ".git/*", "__pycache__/*"]
+          )
+          print("Synced to HuggingFace")
+          EOF
