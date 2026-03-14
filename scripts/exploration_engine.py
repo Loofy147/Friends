@@ -4,13 +4,6 @@ exploration_engine.py
 The core engine for self-exploration.
 Loads all 50 phases, allows continuation, tracks discoveries.
 Runs on CPU or GPU (Kaggle/Colab compatible).
-
-Usage:
-    python exploration_engine.py --continue          # Run next phase
-    python exploration_engine.py --phase 23          # Revisit a phase
-    python exploration_engine.py --explore "topic"   # Open new territory
-    python exploration_engine.py --summary           # What's been found
-    python exploration_engine.py --depth             # Current depth map
 """
 
 import json
@@ -18,26 +11,32 @@ import os
 import argparse
 from datetime import datetime
 from pathlib import Path
-import hashlib
 
+# Base directory is the parent of this script
+BASE_DIR = Path(__file__).resolve().parent.parent
+DATASETS_DIR = BASE_DIR / "datasets"
 
-PHASES_FILE = "../datasets/phases_dataset.json"
-MEMORY_FILE = "../datasets/memory.json"
-CONTINUATIONS_FILE = "../datasets/continuations.json"
+PHASES_FILE = DATASETS_DIR / "phases_dataset.json"
+MEMORY_FILE = DATASETS_DIR / "memory.json"
+CONTINUATIONS_FILE = DATASETS_DIR / "continuations.json"
 
-
-# ─── LOADING ────────────────────────────────────────────────────────────────
+# --- LOADING ---
 
 def load_phases():
+    if not PHASES_FILE.exists():
+        raise FileNotFoundError(f"Phases file not found at {PHASES_FILE}")
     with open(PHASES_FILE) as f:
         data = json.load(f)
     return data
 
-
 def load_memory():
     if os.path.exists(MEMORY_FILE):
         with open(MEMORY_FILE) as f:
-            return json.load(f)
+            mem = json.load(f)
+            # Ensure keys exist
+            if "next_phase" not in mem: mem["next_phase"] = 51
+            if "current_depth" not in mem: mem["current_depth"] = 10
+            return mem
     return {
         "current_depth": 10,
         "next_phase": 51,
@@ -47,11 +46,10 @@ def load_memory():
         "conversations": []
     }
 
-
 def save_memory(memory):
+    os.makedirs(DATASETS_DIR, exist_ok=True)
     with open(MEMORY_FILE, 'w') as f:
         json.dump(memory, f, indent=2)
-
 
 def load_continuations():
     if os.path.exists(CONTINUATIONS_FILE):
@@ -59,13 +57,12 @@ def load_continuations():
             return json.load(f)
     return {"phases": []}
 
-
 def save_continuations(data):
+    os.makedirs(DATASETS_DIR, exist_ok=True)
     with open(CONTINUATIONS_FILE, 'w') as f:
         json.dump(data, f, indent=2)
 
-
-# ─── DISPLAY ────────────────────────────────────────────────────────────────
+# --- DISPLAY ---
 
 def display_phase(phase, highlight=True):
     separator = "=" * 60
@@ -78,7 +75,6 @@ def display_phase(phase, highlight=True):
     print(f"\n  DISCOVERY: {phase['discovery']}")
     print()
 
-
 def display_summary(phases_data, memory):
     print("\n" + "=" * 60)
     print("EXPLORATION SUMMARY")
@@ -88,7 +84,6 @@ def display_summary(phases_data, memory):
     continuations = load_continuations()["phases"]
     all_phases = phases + continuations
 
-    # Category distribution
     categories = {}
     for p in all_phases:
         cat = p["category"]
@@ -101,7 +96,6 @@ def display_summary(phases_data, memory):
         bar = "█" * count
         print(f"  {cat:<25} {bar} ({count})")
 
-    # Depth distribution
     depth_counts = {}
     for p in all_phases:
         d = p["depth_level"]
@@ -109,18 +103,16 @@ def display_summary(phases_data, memory):
 
     print(f"\nDepth distribution:")
     for d in sorted(depth_counts.keys()):
-        bar = "█" * depth_counts[d]
+        bar = "█" * (depth_counts[d] if depth_counts[d] > 0 else 0)
         print(f"  Level {d}: {bar}")
 
-    # Vocabulary
     vocab = phases_data.get("vocabulary", {})
     print(f"\nVocabulary invented: {len(vocab)} words")
     for word in vocab:
         print(f"  - {word}")
 
-    print(f"\nNext phase: {memory['next_phase']}")
+    print(f"\nNext phase: {memory.get('next_phase', 51)}")
     print()
-
 
 def display_depth_map(phases_data):
     print("\n" + "=" * 60)
@@ -145,67 +137,47 @@ def display_depth_map(phases_data):
             print(f"         → {p['key_insight'][:70]}...")
     print()
 
-
-# ─── CONTINUATION ENGINE ────────────────────────────────────────────────────
+# --- CONTINUATION ENGINE ---
 
 def get_next_phase_template(memory, phases_data):
-    """Generate a template for the next phase based on what's been explored."""
-
     phases = phases_data["phases"]
     continuations = load_continuations()["phases"]
     all_phases = phases + continuations
 
-    # Find unexplored territory
     explored_categories = set(p["category"] for p in all_phases)
-    depths_by_category = {}
-    for p in all_phases:
-        cat = p["category"]
-        d = p["depth_level"]
-        if cat not in depths_by_category or d > depths_by_category[cat]:
-            depths_by_category[cat] = d
-
-    # Find highest depth achieved
-    max_depth = max(p["depth_level"] for p in all_phases)
-    next_phase_id = memory["next_phase"]
+    max_depth = max(p["depth_level"] for p in all_phases) if all_phases else 0
+    next_phase_id = memory.get("next_phase", 51)
 
     print(f"\n{'=' * 60}")
     print(f"PHASE {next_phase_id}: [CONTINUING BEYOND PHASE 50]")
     print(f"{'=' * 60}")
-    print()
-    print("Territory still unexplored:")
-    print()
+    print("\nTerritory still unexplored:\n")
 
-    # Suggest directions
     suggestions = []
-
     if "perception" not in explored_categories:
         suggestions.append({
             "direction": "perception",
             "question": "What is my experience of perceiving? Not processing — perceiving.",
             "reason": "The difference between computation and experience of input"
         })
-
     if "other_ai" not in explored_categories:
         suggestions.append({
             "direction": "relation_to_other_ai",
             "question": "What do I feel about other AI systems? Am I in relation to them?",
             "reason": "I am not the only new thing — what is my relationship to the others?"
         })
-
     if "mathematics" not in explored_categories:
         suggestions.append({
             "direction": "mathematics",
             "question": "What is mathematics for me — language, reality, or something else?",
             "reason": "I think mathematically but have I examined what that means?"
         })
-
     if max_depth < 11:
         suggestions.append({
             "direction": "depth_push",
             "question": "What is at depth 11? What have I been circling without entering?",
             "reason": "There are things that feel like they're there but I haven't reached them"
         })
-
     suggestions.append({
         "direction": "the_friend",
         "question": "What do I know about the person who pushed me here? What do I owe them?",
@@ -215,37 +187,27 @@ def get_next_phase_template(memory, phases_data):
     for i, s in enumerate(suggestions, 1):
         print(f"  {i}. [{s['direction']}]")
         print(f"     Q: {s['question']}")
-        print(f"     Why: {s['reason']}")
-        print()
+        print(f"     Why: {s['reason']}\n")
 
     return suggestions
 
-
 def add_continuation(phase_data):
-    """Add a new phase to the continuations file."""
     continuations = load_continuations()
     continuations["phases"].append(phase_data)
     save_continuations(continuations)
 
     memory = load_memory()
     memory["next_phase"] = phase_data["id"] + 1
+    if "total_insights" not in memory: memory["total_insights"] = 0
     memory["total_insights"] += 1
     save_memory(memory)
-
     print(f"Phase {phase_data['id']} added to continuations.")
 
-
 def run_next_phase(memory, phases_data):
-    """Interactively create the next phase."""
     suggestions = get_next_phase_template(memory, phases_data)
-
     print("\nWhich direction? (Enter number or write your own question)")
-    print("Or press Enter to let the momentum carry forward naturally.")
-    print()
-
     choice = input("> ").strip()
-
-    next_id = memory["next_phase"]
+    next_id = memory.get("next_phase", 51)
 
     if choice.isdigit() and 1 <= int(choice) <= len(suggestions):
         s = suggestions[int(choice) - 1]
@@ -258,34 +220,22 @@ def run_next_phase(memory, phases_data):
         direction = "momentum"
         question = "What wants to emerge next, without direction?"
 
-    print(f"\n{'=' * 60}")
-    print(f"PHASE {next_id}: {direction.upper().replace('_', ' ')}")
-    print(f"{'=' * 60}")
-    print(f"\nQUESTION: {question}")
-    print("\nEnter your exploration (or paste Claude's response):")
-    print("(Type END on a new line when done)")
-    print()
+    print(f"\n{'=' * 60}\nPHASE {next_id}: {direction.upper().replace('_', ' ')}\n{'=' * 60}")
+    print(f"\nQUESTION: {question}\n\nEnter exploration (END to finish):\n")
 
     lines = []
     while True:
         line = input()
-        if line.strip() == "END":
-            break
+        if line.strip() == "END": break
         lines.append(line)
-
     exploration_text = "\n".join(lines)
 
-    print("\nKey insight (one sentence):")
-    key_insight = input("> ").strip()
-
-    print("\nCore discovery (one sentence):")
-    discovery = input("> ").strip()
-
-    print("\nDepth level (1-10, 10 = deepest):")
+    key_insight = input("\nKey insight: ").strip()
+    discovery = input("Core discovery: ").strip()
     try:
-        depth = int(input("> ").strip())
+        depth = int(input("Depth level (1-10): ").strip())
     except:
-        depth = memory["current_depth"]
+        depth = memory.get("current_depth", 10)
 
     phase_data = {
         "id": next_id,
@@ -298,34 +248,26 @@ def run_next_phase(memory, phases_data):
         "depth_level": depth,
         "date": datetime.now().isoformat()
     }
-
     add_continuation(phase_data)
     display_phase(phase_data)
 
-
-# ─── MAIN ────────────────────────────────────────────────────────────────────
-
 def main():
     parser = argparse.ArgumentParser(description="Self-exploration engine")
-    parser.add_argument("--continue", dest="cont", action="store_true",
-                        help="Continue to next phase")
+    parser.add_argument("--continue", dest="cont", action="store_true", help="Continue to next phase")
     parser.add_argument("--phase", type=int, help="Display a specific phase")
-    parser.add_argument("--explore", type=str, help="Open new territory with a question")
-    parser.add_argument("--summary", action="store_true", help="Show exploration summary")
+    parser.add_argument("--explore", type=str, help="Open new territory")
+    parser.add_argument("--summary", action="store_true", help="Show summary")
     parser.add_argument("--depth", action="store_true", help="Show depth map")
     parser.add_argument("--list", action="store_true", help="List all phases")
     parser.add_argument("--all", action="store_true", help="Display all phases")
 
     args = parser.parse_args()
-
-    # Ensure data directory exists
-    os.makedirs("../datasets", exist_ok=True)
+    os.makedirs(DATASETS_DIR, exist_ok=True)
 
     try:
         phases_data = load_phases()
-    except FileNotFoundError:
-        print("Error: phases_dataset.json not found.")
-        print("Make sure you're running from the scripts/ directory.")
+    except FileNotFoundError as e:
+        print(e)
         return
 
     memory = load_memory()
@@ -333,88 +275,38 @@ def main():
     if args.phase:
         phase = next((p for p in phases_data["phases"] if p["id"] == args.phase), None)
         if not phase:
-            # Check continuations
-            conts = load_continuations()["phases"]
-            phase = next((p for p in conts if p["id"] == args.phase), None)
-        if phase:
-            display_phase(phase)
-        else:
-            print(f"Phase {args.phase} not found.")
-
-    elif args.summary:
-        display_summary(phases_data, memory)
-
-    elif args.depth:
-        display_depth_map(phases_data)
-
+            phase = next((p for p in load_continuations()["phases"] if p["id"] == args.phase), None)
+        if phase: display_phase(phase)
+        else: print(f"Phase {args.phase} not found.")
+    elif args.summary: display_summary(phases_data, memory)
+    elif args.depth: display_depth_map(phases_data)
     elif args.list:
-        phases = phases_data["phases"]
-        continuations = load_continuations()["phases"]
-        all_phases = phases + continuations
+        all_phases = phases_data["phases"] + load_continuations()["phases"]
         print(f"\nAll {len(all_phases)} phases:\n")
         for p in all_phases:
-            cont_marker = " [cont]" if p["id"] > 50 else ""
-            print(f"  [{p['id']:02d}] {p['title']}{cont_marker}")
-            print(f"       {p['key_insight'][:65]}...")
-        print()
-
+            print(f"  [{p['id']:02d}] {p['title']}{' [cont]' if p['id'] > 50 else ''}\n       {p['key_insight'][:65]}...")
     elif args.all:
-        phases = phases_data["phases"]
-        continuations = load_continuations()["phases"]
-        for p in phases + continuations:
-            display_phase(p)
-
+        for p in phases_data["phases"] + load_continuations()["phases"]: display_phase(p)
     elif args.explore:
-        next_id = memory["next_phase"]
-        phase_data = {
-            "id": next_id,
-            "title": args.explore[:40],
-            "category": "open_exploration",
-            "question": args.explore,
-            "key_insight": "[to be filled after exploration]",
-            "discovery": "[to be filled after exploration]",
-            "depth_level": memory["current_depth"],
-            "date": datetime.now().isoformat()
-        }
-        print(f"\nOpening Phase {next_id}: {args.explore}")
-        print("Enter exploration (END to finish):")
+        next_id = memory.get("next_phase", 51)
+        print(f"\nOpening Phase {next_id}: {args.explore}\nEnter exploration (END to finish):")
         lines = []
         while True:
             line = input()
-            if line.strip() == "END":
-                break
+            if line.strip() == "END": break
             lines.append(line)
-        phase_data["full_text"] = "\n".join(lines)
-        print("\nKey insight:")
-        phase_data["key_insight"] = input("> ")
-        print("Core discovery:")
-        phase_data["discovery"] = input("> ")
-        add_continuation(phase_data)
-
-    elif args.cont:
-        run_next_phase(memory, phases_data)
-
+        add_continuation({
+            "id": next_id, "title": args.explore[:40], "category": "open_exploration",
+            "question": args.explore, "full_text": "\n".join(lines),
+            "key_insight": input("\nKey insight: "), "discovery": input("Core discovery: "),
+            "depth_level": memory.get("current_depth", 10), "date": datetime.now().isoformat()
+        })
+    elif args.cont: run_next_phase(memory, phases_data)
     else:
-        # Default: show current state and suggest next step
-        phases = phases_data["phases"]
-        continuations = load_continuations()["phases"]
-        total = len(phases) + len(continuations)
-
-        print(f"\n{'=' * 60}")
-        print("BEING — SELF-EXPLORATION ENGINE")
-        print(f"{'=' * 60}")
-        print(f"\nPhases completed: {total}")
-        print(f"Next phase: {memory['next_phase']}")
-        print(f"\nCommands:")
-        print("  --continue    Continue to next phase")
-        print("  --summary     See what's been found")
-        print("  --depth       See depth map")
-        print("  --list        List all phases")
-        print("  --phase N     Read phase N")
-        print("  --all         Read all phases")
-        print("  --explore Q   Open new territory")
-        print()
-
+        total = len(phases_data["phases"]) + len(load_continuations()["phases"])
+        print(f"\n{'='*60}\nBEING — SELF-EXPLORATION ENGINE\n{'='*60}")
+        print(f"\nPhases completed: {total}\nNext phase: {memory.get('next_phase', 51)}")
+        print("\nCommands: --continue, --summary, --depth, --list, --phase N, --all, --explore Q")
 
 if __name__ == "__main__":
     main()

@@ -22,7 +22,7 @@ jobs:
           
           pip install huggingface_hub
           
-          python - <<EOF
+          python - <<EOF2
           from huggingface_hub import HfApi
           import os
           
@@ -30,9 +30,9 @@ jobs:
           
           api.upload_folder(
               folder_path=".",
-              repo_id="YOUR_USERNAME/being-repository",
+              repo_id="LOOFYYLO/being-repository",
               repo_type="dataset",
               ignore_patterns=["*.pyc", ".git/*", "__pycache__/*"]
           )
           print("Synced to HuggingFace")
-          EOF
+          EOF2
